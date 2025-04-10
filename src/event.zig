@@ -23,7 +23,7 @@ pub const Event = union(enum) {
             _ = fmt;
 
             var is_escaped = switch (value.value) {
-                '\r', '\t', ' ' => true,
+                '\r', ' ' => true,
                 else => value.ctrl or value.alt,
             };
 
@@ -51,7 +51,6 @@ pub const Event = union(enum) {
                 try std.fmt.format(writer, "S-{u}", .{ch});
             } else switch (value.value) {
                 '\r' => try std.fmt.format(writer, "Enter", .{}),
-                '\t' => try std.fmt.format(writer, "Tab", .{}),
                 ' ' => try std.fmt.format(writer, "Space", .{}),
                 else => try std.fmt.format(writer, "{u}", .{value.value}),
             }
@@ -64,7 +63,7 @@ pub const Event = union(enum) {
 
     pub const Function = struct {
         value: u8,
-        modifiers: Modifiers,
+        modifiers: Modifiers = .{},
 
         pub fn format(
             value: Function,
@@ -80,14 +79,12 @@ pub const Event = union(enum) {
     };
 
     pub const Modifiers = struct {
-        ctrl: bool,
-        alt: bool,
-        shift: bool,
-
-        const mod_none = Modifiers{ .ctrl = false, .alt = false, .shift = false };
-        const mod_ctrl = Modifiers{ .ctrl = true, .alt = false, .shift = false };
-        const mod_alt = Modifiers{ .ctrl = false, .alt = true, .shift = false };
-        const mod_shift = Modifiers{ .ctrl = false, .alt = false, .shift = true };
+        ctrl: bool = false,
+        alt: bool = false,
+        shift: bool = false,
+        super: bool = false,
+        hyper: bool = false,
+        meta: bool = false,
 
         pub fn format(
             value: Modifiers,
@@ -102,12 +99,20 @@ pub const Event = union(enum) {
                 try std.fmt.format(writer, "C-", .{});
             }
 
-            if (value.alt) {
+            if (value.alt or value.meta) {
                 try std.fmt.format(writer, "M-", .{});
             }
 
             if (value.shift) {
                 try std.fmt.format(writer, "S-", .{});
+            }
+
+            if (value.super) {
+                try std.fmt.format(writer, "D-", .{});
+            }
+
+            if (value.hyper) {
+                try std.fmt.format(writer, "H-", .{});
             }
         }
     };
@@ -126,8 +131,9 @@ pub const Event = union(enum) {
             page_down,
             home,
             end,
+            tab,
         },
-        modifiers: Modifiers,
+        modifiers: Modifiers = .{},
 
         pub fn format(
             value: SpecialKey,
@@ -151,6 +157,7 @@ pub const Event = union(enum) {
                 .page_down => "PageDown",
                 .home => "Home",
                 .end => "End",
+                .tab => "Tab",
             };
 
             try std.fmt.format(writer, "<{}{s}>", .{ value.modifiers, s });
@@ -161,7 +168,7 @@ pub const Event = union(enum) {
         x: u16,
         y: u16,
         button: Button,
-        modifiers: Modifiers,
+        modifiers: Modifiers = .{},
 
         pub fn format(
             value: Mouse,
@@ -232,15 +239,14 @@ pub const Event = union(enum) {
     };
 
     pub fn parseModifiers(ch: u8) !Modifiers {
-        return switch (ch) {
-            '2' => Modifiers.mod_shift,
-            '3' => Modifiers.mod_alt,
-            '4' => Modifiers{ .ctrl = false, .shift = true, .alt = true },
-            '5' => Modifiers.mod_ctrl,
-            '6' => Modifiers{ .ctrl = true, .shift = true, .alt = false },
-            '7' => Modifiers{ .ctrl = true, .shift = false, .alt = true },
-            '8' => Modifiers{ .ctrl = true, .shift = true, .alt = false },
-            else => return error.UnknownModifier,
+        const n = ch - '1';
+        return Modifiers{
+            .shift = n & 1 != 0,
+            .alt = n & 2 != 0,
+            .ctrl = n & 4 != 0,
+            .super = n & 8 != 0,
+            .hyper = n & 16 != 0,
+            .meta = n & 32 != 0,
         };
     }
 
@@ -255,9 +261,9 @@ pub const Event = union(enum) {
             const n = std.fmt.parseInt(u8, first, 10) catch return Event.unknown;
 
             const modifiers = if (it.next()) |mod_buf|
-                if (mod_buf.len == 1) parseModifiers(mod_buf[0]) catch Modifiers.mod_none else Modifiers.mod_none
+                if (mod_buf.len == 1) parseModifiers(mod_buf[0]) catch Modifiers{} else Modifiers{}
             else
-                Modifiers.mod_none;
+                Modifiers{};
 
             return switch (n) {
                 1, 7 => Event{ .special = .{ .key = .home, .modifiers = modifiers } },
@@ -276,16 +282,17 @@ pub const Event = union(enum) {
         }
 
         switch (buf[0]) {
-            'A' => return Event{ .special = .{ .key = .up, .modifiers = Modifiers.mod_none } },
-            'B' => return Event{ .special = .{ .key = .down, .modifiers = Modifiers.mod_none } },
-            'C' => return Event{ .special = .{ .key = .left, .modifiers = Modifiers.mod_none } },
-            'D' => return Event{ .special = .{ .key = .right, .modifiers = Modifiers.mod_none } },
-            'F' => return Event{ .special = .{ .key = .end, .modifiers = Modifiers.mod_none } },
-            'H' => return Event{ .special = .{ .key = .home, .modifiers = Modifiers.mod_none } },
-            'P' => return Event{ .function = .{ .value = 1, .modifiers = Modifiers.mod_none } },
-            'Q' => return Event{ .function = .{ .value = 2, .modifiers = Modifiers.mod_none } },
-            'R' => return Event{ .function = .{ .value = 3, .modifiers = Modifiers.mod_none } },
-            'S' => return Event{ .function = .{ .value = 4, .modifiers = Modifiers.mod_none } },
+            'A' => return Event{ .special = .{ .key = .up } },
+            'B' => return Event{ .special = .{ .key = .down } },
+            'C' => return Event{ .special = .{ .key = .left } },
+            'D' => return Event{ .special = .{ .key = .right } },
+            'F' => return Event{ .special = .{ .key = .end } },
+            'H' => return Event{ .special = .{ .key = .home } },
+            'P' => return Event{ .function = .{ .value = 1 } },
+            'Q' => return Event{ .function = .{ .value = 2 } },
+            'R' => return Event{ .function = .{ .value = 3 } },
+            'S' => return Event{ .function = .{ .value = 4 } },
+            'Z' => return Event{ .special = .{ .key = .tab } },
             '1' => {
                 if (buf.len < 2) {
                     return Event.unknown;
@@ -342,19 +349,21 @@ pub const Event = union(enum) {
         }
 
         if (len >= 1) switch (buf[0]) {
-            '\x1b' => if (len >= 2) switch (buf[1]) {
+            '\x1B' => if (len >= 2) switch (buf[1]) {
                 // CSI
                 '[' => if (len >= 3) {
                     return parseCsi(buf[2..len]);
                 },
                 // F1-F4
                 '\x4f' => if (len >= 3) {
-                    return Event{ .function = .{ .value = (1 + buf[2] - '\x50'), .modifiers = Modifiers.mod_none } };
+                    return Event{ .function = .{ .value = (1 + buf[2] - '\x50') } };
                 } else {
                     return Event.unknown;
                 },
+                '\x7f' => return Event{ .special = .{ .key = .backspace, .modifiers = .{ .alt = true } } },
+                '\x1B' => return Event{ .special = .{ .key = .esc, .modifiers = .{ .alt = true } } },
                 '\x00' => return Event{ .char = .{ .value = ' ', .ctrl = true, .alt = true } },
-                '\x09' => return Event{ .char = .{ .value = '\t', .ctrl = false, .alt = true } },
+                '\x09' => return Event{ .special = .{ .key = .tab, .modifiers = .{ .ctrl = true } } },
                 // <C-M-{}>
                 '\x01'...'\x08', '\x0A'...'\x0C', '\x0E'...'\x1A' => |c| if (len >= 2) {
                     return Event{ .char = .{ .value = @as(u21, c) + '\x60', .ctrl = true, .alt = true } };
@@ -362,11 +371,11 @@ pub const Event = union(enum) {
                 // <M-{}>
                 else => return Event{ .char = .{ .value = buf[1], .ctrl = false, .alt = true } },
             } else {
-                return Event{ .special = .{ .key = .esc, .modifiers = Modifiers.mod_none } };
+                return Event{ .special = .{ .key = .esc } };
             },
-            '\x7f' => return Event{ .special = .{ .key = .backspace, .modifiers = Modifiers.mod_none } },
+            '\x7f' => return Event{ .special = .{ .key = .backspace } },
             '\x00' => return Event{ .char = .{ .value = ' ', .ctrl = true, .alt = false } },
-            '\x09' => return Event{ .char = .{ .value = '\t', .ctrl = false, .alt = false } },
+            '\x09' => return Event{ .special = .{ .key = .tab } },
             // <C-{}>
             '\x01'...'\x08', '\x0A'...'\x0C', '\x0E'...'\x1A' => |c| return Event{ .char = .{ .value = @as(u21, c) + '\x60', .ctrl = true, .alt = false } },
             else => {
