@@ -8,6 +8,25 @@ pub const Event = union(enum) {
     resize,
     unknown,
 
+    pub fn format(
+        value: Event,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = options;
+        _ = fmt;
+
+        switch (value) {
+            .char => |char| try std.fmt.format(writer, "Key({})", .{char}),
+            .function => |function| try std.fmt.format(writer, "Key({})", .{function}),
+            .special => |special| try std.fmt.format(writer, "Key({})", .{special}),
+            .mouse => |mouse| try std.fmt.format(writer, "Mouse({})", .{mouse}),
+            .resize => try std.fmt.format(writer, "Resize", .{}),
+            .unknown => try std.fmt.format(writer, "Unknown", .{}),
+        }
+    }
+
     pub const Char = struct {
         value: u21,
         ctrl: bool,
@@ -292,7 +311,7 @@ pub const Event = union(enum) {
             'Q' => return Event{ .function = .{ .value = 2 } },
             'R' => return Event{ .function = .{ .value = 3 } },
             'S' => return Event{ .function = .{ .value = 4 } },
-            'Z' => return Event{ .special = .{ .key = .tab } },
+            'Z' => return Event{ .special = .{ .key = .tab, .modifiers = .{ .shift = true } } },
             '1' => {
                 if (buf.len < 2) {
                     return Event.unknown;
@@ -353,6 +372,8 @@ pub const Event = union(enum) {
                 // CSI
                 '[' => if (len >= 3) {
                     return parseCsi(buf[2..len]);
+                } else {
+                    return Event{ .char = .{ .value = '[', .alt = true, .ctrl = false } };
                 },
                 // F1-F4
                 '\x4f' => if (len >= 3) {
@@ -363,10 +384,13 @@ pub const Event = union(enum) {
                 '\x7f' => return Event{ .special = .{ .key = .backspace, .modifiers = .{ .alt = true } } },
                 '\x1B' => return Event{ .special = .{ .key = .esc, .modifiers = .{ .alt = true } } },
                 '\x00' => return Event{ .char = .{ .value = ' ', .ctrl = true, .alt = true } },
-                '\x09' => return Event{ .special = .{ .key = .tab, .modifiers = .{ .ctrl = true } } },
+                '\x09' => return Event{ .special = .{ .key = .tab, .modifiers = .{ .alt = true } } },
                 // <C-M-{}>
-                '\x01'...'\x08', '\x0A'...'\x0C', '\x0E'...'\x1A' => |c| if (len >= 2) {
+                '\x01'...'\x08', '\x0A'...'\x0C', '\x0D'...'\x1A' => |c| if (len >= 2) {
                     return Event{ .char = .{ .value = @as(u21, c) + '\x60', .ctrl = true, .alt = true } };
+                },
+                '\x1C'...'\x1F' => |c| if (len >= 2) {
+                    return Event{ .char = .{ .value = @as(u21, c) + '\x40', .ctrl = true, .alt = true } };
                 },
                 // <M-{}>
                 else => return Event{ .char = .{ .value = buf[1], .ctrl = false, .alt = true } },
@@ -378,6 +402,7 @@ pub const Event = union(enum) {
             '\x09' => return Event{ .special = .{ .key = .tab } },
             // <C-{}>
             '\x01'...'\x08', '\x0A'...'\x0C', '\x0E'...'\x1A' => |c| return Event{ .char = .{ .value = @as(u21, c) + '\x60', .ctrl = true, .alt = false } },
+            '\x1C'...'\x1F' => |c| return Event{ .char = .{ .value = @as(u21, c) + '\x40', .ctrl = true, .alt = false } },
             else => {
                 const view = std.unicode.Utf8View.init(buf[0..len]) catch return Event.unknown;
                 var it = view.iterator();
