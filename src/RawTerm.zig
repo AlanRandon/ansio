@@ -1,17 +1,16 @@
 const std = @import("std");
 const Event = @import("event.zig").Event;
+pub const ansi = @import("ansi.zig");
 
 orig: std.posix.termios,
-file: std.fs.File,
+in: std.fs.File,
+out: std.fs.File,
 mouse_tracking: bool,
 
 const RawTerm = @This();
 
-pub const enable_mouse_tracking = "\x1b[?1003h";
-pub const disable_mouse_tracking = "\x1b[?1003l";
-
-pub fn enable(file: std.fs.File, mouse_tracking: bool) !RawTerm {
-    const orig = try std.posix.tcgetattr(file.handle);
+pub fn enable(in: std.fs.File, out: std.fs.File, mouse_tracking: bool) !RawTerm {
+    const orig = try std.posix.tcgetattr(in.handle);
     var termios = orig;
 
     // https://refspecs.linuxfoundation.org/LSB_4.1.0/LSB-Core-generic/LSB-Core-generic/baselib-cfmakeraw-3.html
@@ -40,24 +39,25 @@ pub fn enable(file: std.fs.File, mouse_tracking: bool) !RawTerm {
     termios.cc[@intFromEnum(std.posix.V.MIN)] = 1;
     termios.cc[@intFromEnum(std.posix.V.TIME)] = 0;
 
-    try std.posix.tcsetattr(file.handle, .FLUSH, termios);
+    try std.posix.tcsetattr(in.handle, .FLUSH, termios);
     if (mouse_tracking) {
-        try file.writeAll(enable_mouse_tracking);
+        try out.writeAll(ansi.mouse_tracking.enable);
     }
 
     return RawTerm{
         .orig = orig,
-        .file = file,
+        .in = in,
+        .out = out,
         .mouse_tracking = mouse_tracking,
     };
 }
 
 pub fn disable(raw_term: *RawTerm) !void {
     if (raw_term.mouse_tracking) {
-        try raw_term.file.writeAll(disable_mouse_tracking);
+        try raw_term.out.writeAll(ansi.mouse_tracking.disable);
     }
 
-    try std.posix.tcsetattr(raw_term.file.handle, .FLUSH, raw_term.orig);
+    try std.posix.tcsetattr(raw_term.in.handle, .FLUSH, raw_term.orig);
 }
 
 const EventQueue = @import("EventQueue.zig");
@@ -83,7 +83,7 @@ pub fn eventListener(raw_term: *const RawTerm, allocator: std.mem.Allocator) !*E
         .queue = queue,
     };
 
-    try l.queue.listenStdin(raw_term.file);
+    try l.queue.listenStdin(raw_term.in);
     l.queue.listenSigwinch();
 
     return l;
@@ -97,7 +97,7 @@ const Size = struct {
 pub fn size(raw_term: *const RawTerm) !Size {
     var ws: std.posix.winsize = undefined;
 
-    const err = std.posix.system.ioctl(raw_term.file.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
+    const err = std.posix.system.ioctl(raw_term.in.handle, std.posix.T.IOCGWINSZ, @intFromPtr(&ws));
     if (std.posix.errno(err) != .SUCCESS) {
         return error.IoctlError;
     }

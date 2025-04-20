@@ -6,7 +6,8 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const stdin = std.io.getStdIn();
-    var raw_term = try RawTerm.enable(stdin, true);
+    const stdout = std.io.getStdOut();
+    var raw_term = try RawTerm.enable(stdin, stdout, true);
     defer raw_term.disable() catch {};
 
     var listener = try raw_term.eventListener(allocator);
