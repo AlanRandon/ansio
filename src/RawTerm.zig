@@ -1,5 +1,5 @@
 const std = @import("std");
-const Event = @import("event.zig").Event;
+pub const Event = @import("event.zig").Event;
 pub const ansi = @import("ansi.zig");
 
 orig: std.posix.termios,
@@ -60,7 +60,7 @@ pub fn disable(raw_term: *RawTerm) !void {
     try std.posix.tcsetattr(raw_term.in.handle, .FLUSH, raw_term.orig);
 }
 
-const EventQueue = @import("EventQueue.zig");
+pub const EventQueue = @import("EventQueue.zig");
 
 pub const EventListener = struct {
     queue: EventQueue,
@@ -89,7 +89,7 @@ pub fn eventListener(raw_term: *const RawTerm, allocator: std.mem.Allocator) !*E
     return l;
 }
 
-const Size = struct {
+pub const Size = struct {
     width: u16,
     height: u16,
 };
