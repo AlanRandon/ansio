@@ -9,7 +9,11 @@ consumer_id: AtomicThreadId,
 
 const Queue = @This();
 const Item = Event.ReadError!Event;
-const List = std.DoublyLinkedList(Item);
+const List = std.DoublyLinkedList;
+const Node = struct {
+    node: List.Node,
+    item: Item,
+};
 const AtomicThreadId = std.atomic.Value(std.Thread.Id);
 
 pub fn init(allocator: std.mem.Allocator) Queue {
@@ -49,9 +53,9 @@ pub fn listenSigwinch(queue: *Queue) void {
                         if (std.Thread.getCurrentId() == q.consumer_id.load(.seq_cst)) {
                             // don't bother locking if the queue is waiting on the same thread
                             // this scenario may occur because signals are weird
-                            const node = q.allocator.create(List.Node) catch return;
-                            node.* = .{ .data = .resize };
-                            q.events.prepend(node);
+                            const node = q.allocator.create(Node) catch return;
+                            node.* = .{ .node = .{}, .item = .resize };
+                            q.events.prepend(&node.node);
                             q.condition.signal();
                         } else {
                             q.enqueue(.resize) catch return;
@@ -78,10 +82,10 @@ fn enqueue(queue: *Queue, event: Item) !void {
     {
         queue.lock.lock();
         defer queue.lock.unlock();
-        const node = try queue.allocator.create(List.Node);
+        const node = try queue.allocator.create(Node);
         errdefer queue.allocator.destroy(node);
-        node.* = .{ .data = event };
-        queue.events.prepend(node);
+        node.* = .{ .node = .{}, .item = event };
+        queue.events.prepend(&node.node);
     }
     queue.condition.signal();
 }
@@ -89,13 +93,13 @@ fn enqueue(queue: *Queue, event: Item) !void {
 pub fn wait(queue: *Queue) !Event {
     queue.consumer_id.store(std.Thread.getCurrentId(), .seq_cst);
 
-    while (queue.events.len == 0) {
+    while (queue.events.first == null) {
         queue.condition.wait(&queue.lock);
     }
 
     const node = queue.events.pop() orelse unreachable;
-    defer queue.allocator.destroy(node);
+    const node_ptr = @as(*Node, @fieldParentPtr("node", node));
+    defer queue.allocator.destroy(node_ptr);
 
-    const event = node.data;
-    return event;
+    return node_ptr.item;
 }
