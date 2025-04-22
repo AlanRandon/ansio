@@ -103,3 +103,12 @@ pub fn wait(queue: *Queue) !Event {
 
     return node_ptr.item;
 }
+
+/// clears the queue, assuming it is in a non-waiting state
+pub fn clear(queue: *Queue) !void {
+    while (queue.events.pop()) |node| {
+        const node_ptr = @as(*Node, @fieldParentPtr("node", node));
+        queue.allocator.destroy(node_ptr);
+        _ = try node_ptr.item;
+    }
+}
